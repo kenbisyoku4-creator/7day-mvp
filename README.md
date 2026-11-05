@@ -65,3 +65,7 @@ git push origin HEAD:main
 ```
 
 共有ブランチへのpush前に差分を確認してください。データと秘密値をコミットしないでください。
+
+## Supabase接続準備（まだ未接続）
+
+東京リージョン・IPv4対応セッションプーラーを前提とした [接続準備と移行設計](docs/supabase-connection-plan.md) を参照してください。接続情報は将来 `DATABASE_URL` という秘密環境変数で渡します。`.env.example` は空欄の項目だけで、現在のサーバーは `DATABASE_URL` を読み込まずSQLiteで動作します。外部接続・スキーマ作成・移行は未実施です。
