@@ -1,21 +1,28 @@
 import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, openSync, closeSync, chmodSync } from 'node:fs';
 import { timingSafeEqual, createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 export function createApp({ dbPath = path.join(root, 'data/app.sqlite'), adminPassword = process.env.ADMIN_PASSWORD, secureCookie = process.env.NODE_ENV === 'production' } = {}) {
-  if (dbPath !== ':memory:') mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
+  if (dbPath !== ':memory:') {
+    mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
+    closeSync(openSync(dbPath, 'a', 0o600));
+    chmodSync(dbPath, 0o600);
+  }
   const db = new DatabaseSync(dbPath);
   db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS applications (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL, preference TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL);`);
   const limits = new Map();
   function authorized(req) {
     if (!adminPassword) return false;
-    const token = (req.headers.authorization || '').replace(/^Basic /, '');
-    let password = '';
-    try { const decoded = Buffer.from(token, 'base64').toString(); password = decoded.slice(decoded.indexOf(':') + 1); } catch {}
+    const match = /^Basic ([A-Za-z0-9+/]+={0,2})$/i.exec(req.headers.authorization || '');
+    if (!match) return false;
+    const decoded = Buffer.from(match[1], 'base64').toString('utf8');
+    const separator = decoded.indexOf(':');
+    if (separator < 0 || decoded.slice(0, separator) !== 'admin') return false;
+    const password = decoded.slice(separator + 1);
     return timingSafeEqual(createHash('sha256').update(password).digest(), createHash('sha256').update(adminPassword).digest());
   }
   const server = http.createServer(async (req, res) => {
@@ -43,6 +50,7 @@ export function createApp({ dbPath = path.join(root, 'data/app.sqlite'), adminPa
       try {
         for await (const chunk of req) { body += chunk; if (Buffer.byteLength(body) > 16384) return send(413, { error: '入力内容が長すぎます。' }); }
         const input = JSON.parse(body);
+        if (!input || typeof input !== 'object' || Array.isArray(input)) return send(400, { error: '入力形式をご確認ください。' });
         const { name, email, preference, message = '', consent } = input;
         if (typeof name !== 'string' || !name.trim() || name.length > 80 || typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || !['平日の日中', '平日の夕方以降', '土日祝', '相談して決めたい'].includes(preference) || typeof message !== 'string' || message.length > 1000 || consent !== true) return send(400, { error: 'お名前、メールアドレス、ご希望の時間帯、同意内容をご確認ください。' });
         db.prepare('INSERT INTO applications(name,email,preference,message,created_at) VALUES(?,?,?,?,?)').run(name.trim(), email.trim().toLowerCase(), preference, message.trim(), new Date().toISOString());

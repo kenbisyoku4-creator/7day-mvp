@@ -1,5 +1,6 @@
 const status = document.querySelector('#admin-status');
 async function load() {
+  document.querySelector('#applications').replaceChildren();
   status.textContent = '読み込み中…';
   try {
     const response = await fetch('/api/applications', { cache: 'no-store' });

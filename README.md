@@ -13,7 +13,7 @@ export ADMIN_PASSWORD='十分に長いランダムなパスワードに置き換
 npm start
 ```
 
-公開ページは `/`、管理者一覧は `/admin`。ブラウザのBasic認証ではユーザー名に `admin`、パスワードに `ADMIN_PASSWORD` を入力します（パスワードで認証）。未設定時は管理者画面・APIとも503で閉じます。フォームはパスワード未設定でも利用可能です。`.env` を使う場合は `node --env-file=.env server.js` で起動してください。`.env.example` は項目の見本です。
+公開ページは `/`、管理者一覧は `/admin`。ブラウザのBasic認証ではユーザー名に `admin`、パスワードに `ADMIN_PASSWORD` を入力します（ユーザー名とパスワードで認証）。未設定時は管理者画面・APIとも503で閉じます。フォームはパスワード未設定でも利用可能です。`.env` を使う場合は `node --env-file=.env server.js` で起動してください。`.env.example` は項目の見本です。
 
 ```sh
 npm test
