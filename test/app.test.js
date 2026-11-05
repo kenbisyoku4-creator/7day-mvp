@@ -75,3 +75,81 @@ test('SQLite書込み失敗は成功扱いにせず、個人情報や内部例�
     assert.equal((await post(base, valid)).status, 201);
   } finally { control.close(); await stop(app); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('5回連続失敗で両管理者ルートを15分制限し、再起動後も保持・期限後に解除', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'money-login-lock-'));
+  let time = 1000000;
+  const options = { dbPath: path.join(dir, 'app.sqlite'), adminPassword: 'test-password', now: () => time };
+  const wrong = { Authorization: 'Basic ' + Buffer.from('admin:wrong').toString('base64') };
+  let running = await start(options);
+  try {
+    // An initial browser challenge must not count as a password failure.
+    for (let i = 0; i < 6; i++) assert.equal((await fetch(running.base + '/admin')).status, 401);
+    for (let i = 0; i < 4; i++) assert.equal((await fetch(running.base + (i % 2 ? '/admin' : '/api/applications'), { headers: wrong })).status, 401);
+    let response = await fetch(running.base + '/admin', { headers: wrong });
+    assert.equal(response.status, 429); assert.equal(response.headers.get('retry-after'), '900');
+    assert.equal(response.headers.get('set-cookie'), null); assert.equal(response.headers.get('cache-control'), 'no-store');
+    await stop(running.app); running = await start(options);
+    for (const route of ['/admin', '/api/applications']) {
+      response = await fetch(running.base + route, { headers: { ...auth, 'X-Forwarded-For': '198.51.100.42' } });
+      assert.equal(response.status, 429);
+      assert.doesNotMatch(await response.text(), /test-password|wrong|applications":/);
+    }
+    // Requests made while locked do not extend the lock.
+    time += 899000;
+    response = await fetch(running.base + '/api/applications', { headers: auth });
+    assert.equal(response.status, 429); assert.equal(response.headers.get('retry-after'), '1');
+    time += 1000;
+    response = await fetch(running.base + '/api/applications', { headers: auth });
+    assert.equal(response.status, 200); assert.equal(response.headers.get('set-cookie'), null);
+    assert.equal((await fetch(running.base + '/admin', { headers: wrong })).status, 401);
+    // Public LP and form are unaffected by a login lock.
+    for (let i = 0; i < 4; i++) await fetch(running.base + '/admin', { headers: wrong });
+    assert.equal((await fetch(running.base)).status, 200);
+    assert.equal((await post(running.base, valid)).status, 201);
+  } finally { await stop(running.app); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('認証成功で連続失敗数をリセットし、15分間操作なしでも失敗履歴を期限切れにする', async () => {
+  let time = 1000000;
+  const { app, base } = await start({ dbPath: ':memory:', adminPassword: 'test-password', now: () => time });
+  const wrong = { Authorization: 'Basic ' + Buffer.from('admin:wrong').toString('base64') };
+  try {
+    for (let round = 0; round < 2; round++) {
+      for (let i = 0; i < 4; i++) assert.equal((await fetch(base + '/admin', { headers: wrong })).status, 401);
+      assert.equal((await fetch(base + '/api/applications', { headers: auth })).status, 200);
+    }
+    for (let i = 0; i < 4; i++) await fetch(base + '/admin', { headers: wrong });
+    time += 900000;
+    assert.equal((await fetch(base + '/admin', { headers: wrong })).status, 401);
+    assert.equal((await fetch(base + '/admin', { headers: auth })).status, 200);
+  } finally { await stop(app); }
+});
+
+test('環境変数のパスワードを使い、HTTP応答にもログにも認証情報を出さずCookieを発行しない', async () => {
+  const { randomBytes } = await import('node:crypto');
+  const original = process.env.ADMIN_PASSWORD;
+  const secret = randomBytes(24).toString('hex');
+  process.env.ADMIN_PASSWORD = secret;
+  let running;
+  const logs = []; const originalLog = console.log; const originalError = console.error;
+  console.log = (...args) => logs.push(args.join(' ')); console.error = (...args) => logs.push(args.join(' '));
+  try {
+    running = await start({ dbPath: ':memory:', secureCookie: true });
+    const authorization = 'Basic ' + Buffer.from('admin:' + secret).toString('base64');
+    for (const route of ['/admin', '/api/applications']) {
+      const response = await fetch(running.base + route, { headers: { Authorization: authorization } });
+      assert.equal(response.status, 200); assert.equal(response.headers.get('set-cookie'), null);
+      assert(!JSON.stringify([...response.headers]).includes(secret)); assert(!(await response.text()).includes(secret));
+    }
+    for (let i = 0; i < 5; i++) {
+      const response = await fetch(running.base + '/admin', { headers: { Authorization: 'Basic ' + Buffer.from('admin:invalid-' + secret).toString('base64') } });
+      assert(!(await response.text()).includes(secret));
+    }
+    assert(!logs.join('\n').includes(secret)); assert(!logs.join('\n').includes(authorization));
+  } finally {
+    console.log = originalLog; console.error = originalError;
+    if (running) await stop(running.app);
+    if (original === undefined) delete process.env.ADMIN_PASSWORD; else process.env.ADMIN_PASSWORD = original;
+  }
+});

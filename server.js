@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
-export function createApp({ dbPath = path.join(root, 'data/app.sqlite'), adminPassword = process.env.ADMIN_PASSWORD, secureCookie = process.env.NODE_ENV === 'production' } = {}) {
+export function createApp({ dbPath = path.join(root, 'data/app.sqlite'), adminPassword = process.env.ADMIN_PASSWORD, secureCookie = process.env.NODE_ENV === 'production', now = Date.now } = {}) {
   if (dbPath !== ':memory:') {
     mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
     closeSync(openSync(dbPath, 'a', 0o600));
@@ -14,6 +14,22 @@ export function createApp({ dbPath = path.join(root, 'data/app.sqlite'), adminPa
   }
   const db = new DatabaseSync(dbPath);
   db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS applications (id INTEGER PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL, preference TEXT NOT NULL, message TEXT NOT NULL, created_at TEXT NOT NULL);`);
+  // Persist only failure counts/times, never passwords or Authorization headers.
+  db.exec(`CREATE TABLE IF NOT EXISTS admin_login_attempts (
+    client TEXT PRIMARY KEY, failures INTEGER NOT NULL,
+    locked_until INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  );`);
+  const loginLockMs = 15 * 60 * 1000;
+  const loginAttempt = db.prepare('SELECT locked_until FROM admin_login_attempts WHERE client = ?');
+  const clearLogin = db.prepare('DELETE FROM admin_login_attempts WHERE client = ?');
+  const expireLogins = db.prepare('DELETE FROM admin_login_attempts WHERE updated_at <= ?');
+  const failLogin = db.prepare(`INSERT INTO admin_login_attempts(client, failures, locked_until, updated_at)
+    VALUES (?, 1, 0, ?)
+    ON CONFLICT(client) DO UPDATE SET
+      failures = failures + 1,
+      locked_until = CASE WHEN failures + 1 >= 5 THEN excluded.updated_at + ? ELSE 0 END,
+      updated_at = excluded.updated_at
+    RETURNING locked_until`);
   const limits = new Map();
   function authorized(req) {
     if (!adminPassword) return false;
@@ -34,7 +50,26 @@ export function createApp({ dbPath = path.join(root, 'data/app.sqlite'), adminPa
     if (url.pathname === '/admin' || url.pathname === '/api/applications') {
       res.setHeader('Cache-Control', 'no-store');
       if (!adminPassword) return send(503, { error: '管理者パスワードが設定されていません。' });
-      if (!authorized(req)) { res.setHeader('WWW-Authenticate', 'Basic realm="Applications", charset="UTF-8"'); return send(401, { error: '管理者認証が必要です。' }); }
+      // Use the socket peer only: untrusted forwarding headers must not bypass limits.
+      const client = req.socket.remoteAddress || 'unknown';
+      const time = now();
+      expireLogins.run(time - loginLockMs);
+      const locked = loginAttempt.get(client);
+      const rejectLocked = until => {
+        res.setHeader('Retry-After', String(Math.max(1, Math.ceil((until - time) / 1000))));
+        return send(429, { error: 'ログインの失敗が続いたため、一時的に制限しています。15分後に再度お試しください。' });
+      };
+      if (locked?.locked_until > time) return rejectLocked(locked.locked_until);
+      if (!authorized(req)) {
+        // A browser's initial request without credentials is a challenge, not a failed login.
+        if (req.headers.authorization !== undefined) {
+          const attempt = failLogin.get(client, time, loginLockMs);
+          if (attempt.locked_until > time) return rejectLocked(attempt.locked_until);
+        }
+        res.setHeader('WWW-Authenticate', 'Basic realm="Applications", charset="UTF-8"');
+        return send(401, { error: '管理者認証が必要です。' });
+      }
+      clearLogin.run(client);
       if (req.method !== 'GET') return send(405, { error: '許可されていない操作です。' });
       if (url.pathname === '/api/applications') return send(200, { applications: db.prepare('SELECT * FROM applications ORDER BY id DESC LIMIT 500').all() });
     }
