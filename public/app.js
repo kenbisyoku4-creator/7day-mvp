@@ -11,5 +11,5 @@ form.addEventListener('submit', async event => {
     if (!response.ok) throw new Error(result.error);
     form.reset(); status.textContent = 'お申込みありがとうございます。受付が完了しました。通常2営業日以内にメールで日程をご相談します。'; status.className = 'success';
   } catch (error) { status.textContent = error.message || '通信に失敗しました。時間をおいてお試しください。'; status.className = 'error'; }
-  finally { button.disabled = false; button.innerHTML = '無料相談を申し込む <span>↗</span>'; }
+  finally { button.disabled = false; button.innerHTML = '無料相談に申し込む <span>↗</span>'; }
 });
