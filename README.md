@@ -4,16 +4,16 @@
 
 ## 開発・起動
 
-Node.js 24以上を使用します（Node標準のSQLiteを使用。実験的機能の警告が出る場合があります）。外部依存パッケージやインストール作業は不要です。
+Node.js 24以上を使用します（Node標準のSQLiteを使用。実験的機能の警告が出る場合があります）。依存関係は `npm ci` でインストールします。PostgreSQLドライバー `pg` を使用します。
 
 ```sh
 cd /workspace/7day-mvp
-# 秘密値は環境設定で注入。ローカルの場合は端末で設定します。
-export ADMIN_PASSWORD='十分に長いランダムなパスワードに置き換える'
-npm start
+npm ci
+# ローカル開発ではSQLiteを明示的に選びます。秘密値は環境設定で注入します。
+npm run start:sqlite
 ```
 
-公開ページは `/`、管理者一覧は `/admin`。ブラウザのBasic認証ではユーザー名に `admin`、パスワードに `ADMIN_PASSWORD` を入力します（ユーザー名とパスワードで認証）。未設定時は管理者画面・APIとも503で閉じます。フォームはパスワード未設定でも利用可能です。`.env` を使う場合は `node --env-file=.env server.js` で起動してください。`.env.example` は項目の見本です。
+公開ページは `/`、管理者一覧は `/admin`。ブラウザのBasic認証ではユーザー名に `admin`、パスワードに `ADMIN_PASSWORD` を入力します（ユーザー名とパスワードで認証）。未設定時は管理者画面・APIとも503で閉じます。フォームはパスワード未設定でも利用可能です。`.env` を使う場合は `node --env-file=.env server.js` で起動してください。SQLiteを使う場合は `STORAGE_BACKEND=sqlite` の明示指定が必要です。通常の `npm start` はPostgreSQLを選び、`DATABASE_URL` がない場合や接続失敗時は停止します。今回は本番接続情報を登録せず、Supabaseへの接続も行っていません。`.env.example` は項目の見本です。
 
 ```sh
 npm test
@@ -27,7 +27,7 @@ HTTP経由のテストで日本語ページ、正常申込、不正入力、同�
 
 ## 保存と運用
 
-- `data/app.sqlite` に申込を保存します。DB・個人情報・秘密値はGit対象外です。サーバー再起動後も保持されますが、使い捨てディスクのホスティングでは消えます。単一インスタンス＋永続ディスクを使用してください。
+- SQLiteを明示的に選択した場合は `data/app.sqlite` に申込を保存します。PostgreSQLでは外部DBの `money_private.applications` と `money_private.admin_login_attempts` を使います。DB・個人情報・秘密値はGit対象外です。サーバー再起動後も保持されますが、使い捨てディスクのホスティングでは消えます。単一インスタンス＋永続ディスクを使用してください。
 - 管理者一覧は新しい順に最大500件。氏名・メール・希望時間帯・相談内容・日本時間の受付日時を表示します。相談内容はHTMLとして解釈しません。
 - 管理画面は個人情報を扱うため、公開はHTTPS必須です。リバースプロキシを前段に配置し `NODE_ENV=production` を指定、HostとOriginのホスト名を維持してください。可能なら管理画面にアクセス制限も設定します。Basic認証をHTTPで公開しないでください。
 - 送信は接続元IPごとに1時間10件まで。プロセス再起動でリセットされ、リバースプロキシ配下では同一IPとして数えられます。公開運用ではプロキシ側の制限を合わせて調整してください。
@@ -66,6 +66,16 @@ git push origin HEAD:main
 
 共有ブランチへのpush前に差分を確認してください。データと秘密値をコミットしないでください。
 
-## Supabase接続準備（まだ未接続）
+## Supabase対応（外部接続・移行は未実施）
 
-東京リージョン・IPv4対応セッションプーラーを前提とした [接続準備と移行設計](docs/supabase-connection-plan.md) を参照してください。接続情報は将来 `DATABASE_URL` という秘密環境変数で渡します。`.env.example` は空欄の項目だけで、現在のサーバーは `DATABASE_URL` を読み込まずSQLiteで動作します。外部接続・スキーマ作成・移行は未実施です。
+東京リージョンのIPv4セッションプーラー用PostgreSQLアダプターを実装しました。[実装と検証結果](docs/postgres-implementation.md) を参照してください。通常起動はPostgreSQLで、秘密環境変数 `DATABASE_URL` が必須です。接続失敗時はSQLiteに切り替えません。
+
+DDLは `migrations/001-postgres.sql`。アプリ起動時には実行せず、将来承認されたDB構築工程で管理用ロールにより実行します。接続設定・TLS・専用ロールの確認が必要です。旧データの移行スクリプトは未実装です。
+
+```sh
+npm test
+# ローカルPostgreSQL 17とopensslが利用可能な場合のみ実行。外部DBを使用しません。
+PG_TEST_BIN=/path/to/postgresql/bin npm run test:postgres
+```
+
+テストは環境に登録済みのDATABASE_URLを使用しません。PostgreSQL統合テストは127.0.0.1だけに起動した一時DBと一時証明書を使い、終了後に削除します。
