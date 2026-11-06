@@ -1,0 +1,37 @@
+name: PR tests
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-tests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Node.js 24 tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Production credentials are never supplied to this job.
+      ADMIN_PASSWORD: ''
+      DATABASE_URL: ''
+    steps:
+      - name: Check out pull request
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v5
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run tests
+        run: npm test
