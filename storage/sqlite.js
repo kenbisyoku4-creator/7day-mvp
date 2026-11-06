@@ -29,6 +29,7 @@ export function createSqliteStore(dbPath) {
     RETURNING locked_until`);
 
   return {
+    health: () => { if (db.prepare('SELECT 1 AS ok').get().ok !== 1) throw new Error('データベースを利用できません。'); },
     ready: async () => {},
     insert: input => db.prepare('INSERT INTO applications(name,email,preference,message,created_at) VALUES(?,?,?,?,?)').run(input.name,input.email,input.preference,input.message,input.created_at),
     list: () => db.prepare('SELECT id,name,email,preference,message,created_at FROM applications ORDER BY id DESC LIMIT 500').all(),

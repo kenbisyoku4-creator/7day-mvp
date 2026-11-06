@@ -18,6 +18,8 @@ async function stop(app) { app.closeAllConnections(); await new Promise(resolve 
 test('実PostgreSQL: TLSで申込保存・管理者一覧・同じDBへの再接続後の保持', async () => {
   let running = await serve(createPostgresStore({ env }));
   try {
+    const health = await fetch(running.base + '/healthz');
+    assert.equal(health.status, 200); assert.deepEqual(await health.json(), { status: 'ok' });
     assert.equal((await fetch(running.base + '/api/applications')).status, 401);
     assert.equal((await fetch(running.base + '/api/consultations', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'ローカル検証専用', email: 'local-test@example.com', preference: '土日祝', message: '<script>test</script>', consent: true }) })).status, 201);
     let response = await fetch(running.base + '/api/applications', { headers: auth });

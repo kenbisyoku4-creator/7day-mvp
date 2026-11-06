@@ -29,6 +29,10 @@ export function createPostgresStore({ env = process.env, Pool = pg.Pool } = {}) 
   let closed;
   async function safe(operation) { try { return await operation(); } catch { throw unavailable(); } }
   return {
+    health: () => safe(async () => {
+      const { rows } = await pool.query({ text: 'SELECT 1 AS ok', query_timeout: 2000 });
+      if (rows[0]?.ok !== 1) throw unavailable();
+    }),
     ready: () => safe(async () => {
       await pool.query('SELECT id, name, email, preference, message, created_at FROM money_private.applications LIMIT 0');
       await pool.query('SELECT client, failures, locked_until, updated_at FROM money_private.admin_login_attempts LIMIT 0');

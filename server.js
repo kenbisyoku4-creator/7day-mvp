@@ -15,6 +15,14 @@ export function createApp(options = {}) {
     ? createSqliteStore(options.dbPath || path.join(root, 'data/app.sqlite'))
     : createPostgresStore());
   const limits = new Map();
+  // Share slow probes so repeated health checks cannot fill the DB connection pool.
+  let healthInFlight;
+  function databaseHealth() {
+    if (!healthInFlight) {
+      healthInFlight = Promise.resolve().then(() => storage.health()).finally(() => { healthInFlight = undefined; });
+    }
+    return healthInFlight;
+  }
   function authorized(req) {
     if (!adminPassword) return false;
     const match = /^Basic ([A-Za-z0-9+/]+={0,2})$/i.exec(req.headers.authorization || '');
@@ -31,7 +39,22 @@ export function createApp(options = {}) {
     res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     const send = (status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
     const url = new URL(req.url, 'http://localhost');
-    if (url.pathname === '/admin' || url.pathname === '/api/applications') {
+    if (url.pathname === '/healthz') {
+      if (!['GET', 'HEAD'].includes(req.method)) {
+        res.setHeader('Allow', 'GET, HEAD');
+        return send(405, { status: 'method_not_allowed' });
+      }
+      let timer;
+      try {
+        await Promise.race([
+          databaseHealth(),
+          new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('health timeout')), 3000); }),
+        ]);
+        return send(200, { status: 'ok' });
+      } catch { return send(503, { status: 'unavailable' }); }
+      finally { clearTimeout(timer); }
+    }
+    if (url.pathname === '/admin'  || url.pathname === '/api/applications') {
       res.setHeader('Cache-Control', 'no-store');
       if (!adminPassword) return send(503, { error: '管理者パスワードが設定されていません。' });
       // Use the socket peer only: untrusted forwarding headers must not bypass limits.
