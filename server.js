@@ -8,7 +8,7 @@ import path from 'node:path';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 export function createApp(options = {}) {
-  const { adminPassword = process.env.ADMIN_PASSWORD, secureCookie = process.env.NODE_ENV === 'production', now = Date.now } = options;
+  const { adminPassword = process.env.ADMIN_PASSWORD, secureCookie = process.env.NODE_ENV === 'production', now = Date.now, privateSite = process.env.SITE_ACCESS === 'private' || (process.env.NODE_ENV === 'production' && process.env.SITE_ACCESS !== 'public') } = options;
   const backend = process.env.STORAGE_BACKEND || 'postgres';
   if (!options.storage && !Object.hasOwn(options, 'dbPath') && !['sqlite', 'postgres'].includes(backend)) throw new Error('保存方式の設定を確認してください。');
   const storage = options.storage || (Object.hasOwn(options, 'dbPath') || backend === 'sqlite'
@@ -39,6 +39,10 @@ export function createApp(options = {}) {
     res.setHeader('Content-Security-Policy', "default-src 'self'; style-src 'self'; script-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
     const send = (status, value) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(value)); };
     const url = new URL(req.url, 'http://localhost');
+    if (privateSite) {
+      res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+      res.setHeader('Cache-Control', 'no-store');
+    }
     if (url.pathname === '/healthz') {
       if (!['GET', 'HEAD'].includes(req.method)) {
         res.setHeader('Allow', 'GET, HEAD');
@@ -54,7 +58,8 @@ export function createApp(options = {}) {
       } catch { return send(503, { status: 'unavailable' }); }
       finally { clearTimeout(timer); }
     }
-    if (url.pathname === '/admin'  || url.pathname === '/api/applications') {
+    const adminRoute = url.pathname === '/admin' || url.pathname === '/api/applications';
+    if (privateSite || adminRoute) {
       res.setHeader('Cache-Control', 'no-store');
       if (!adminPassword) return send(503, { error: '管理者パスワードが設定されていません。' });
       // Use the socket peer only: untrusted forwarding headers must not bypass limits.
@@ -71,7 +76,7 @@ export function createApp(options = {}) {
         res.setHeader('WWW-Authenticate', 'Basic realm="Applications", charset="UTF-8"');
         return send(401, { error: '管理者認証が必要です。' });
       }
-      if (req.method !== 'GET') return send(405, { error: '許可されていない操作です。' });
+      if (adminRoute && req.method !== 'GET') return send(405, { error: '許可されていない操作です。' });
       if (url.pathname === '/api/applications') {
         try { return send(200, { applications: await storage.list() }); }
         catch { return send(503, { error: '申込情報を取得できません。時間をおいて再度お試しください。' }); }
