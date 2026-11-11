@@ -18,7 +18,11 @@ export function postgresConfig(env = process.env) {
       host: url.hostname, port: Number(url.port || 5432),
       user: decodeURIComponent(url.username), password: decodeURIComponent(url.password),
       database: decodeURIComponent(url.pathname.slice(1)),
-      ssl: { rejectUnauthorized: true, ...(env.DATABASE_CA_CERT_PATH ? { ca: readFileSync(env.DATABASE_CA_CERT_PATH, 'utf8') } : {}) },
+      ssl: { rejectUnauthorized: true, ...(env.DATABASE_CA_CERT_PATH
+        ? { ca: readFileSync(env.DATABASE_CA_CERT_PATH, 'utf8') }
+        : url.hostname.endsWith('.pooler.supabase.com')
+          ? { ca: readFileSync(new URL('../certs/prod-ca-2021.crt', import.meta.url), 'utf8') }
+          : {}) },
       max: 3, idleTimeoutMillis: 30000, connectionTimeoutMillis: 10000,
       statement_timeout: 10000, query_timeout: 12000, lock_timeout: 5000,
       idle_in_transaction_session_timeout: 15000,
