@@ -85,3 +85,9 @@ PG_TEST_BIN=/path/to/postgresql/bin npm run test:postgres
 Health Check Pathには `/healthz` を指定します。GET / HEADに対応し、読み取り専用の `SELECT 1` でDB接続を確認します。正常時は200と `{"status":"ok"}`、失敗・3秒以内に確認できない場合は503と `{"status":"unavailable"}`。HEADは本文なしです。認証不要ですが、接続先・秘密値・申込情報・例外詳細は返さず、応答はキャッシュしません。同時チェックはDB確認を共有し、接続プールの圧迫を抑えます。
 
 これはDBの応答確認であり、バックアップや全テーブルの権限を保証するものではありません。起動時の既存スキーマ確認は別に維持しています。今回の実装ではSupabaseへの外部接続や既存データの操作はしていません。
+
+## 閲覧制限付きプレビュー
+
+Renderでは `NODE_ENV=production` と `SITE_ACCESS=private` を指定します。全ページ・静的ファイル・申込APIはBasic認証で保護され、ユーザー名 `admin` と既存の `ADMIN_PASSWORD` を使います。追加のパスワード設定は不要です。認証失敗の回数制限も全体に適用します。パスワード未設定時は503で閉じます。検索除外とno-storeを付けます。HTTPSでのみ使用してください。
+
+RenderのHealth Check Pathは `/healthz`。この経路だけは認証なしでDBの稼働状態のみ返します。WebサービスのURL自体はインターネット上に作成されますが、コンテンツには認証が必要です。実際の一般公開には明示的な `SITE_ACCESS=public` が必要で、管理画面の認証は継続します。開発環境では既存動作を維持し、`SITE_ACCESS=private` で認証をテストできます。
