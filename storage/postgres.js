@@ -1,7 +1,12 @@
 import pg from 'pg';
 import { readFileSync } from 'node:fs';
 
-const unavailable = () => new Error('データベースを利用できません。');
+const diagnosticCodes = new Set(['28P01', '28000', '3D000', '3F000', '42P01', '42703', '42501', '53300', '57P03', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'SELF_SIGNED_CERT_IN_CHAIN', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'CERT_HAS_EXPIRED', 'ERR_TLS_CERT_ALTNAME_INVALID']);
+const unavailable = (cause) => {
+  const error = new Error('データベースを利用できません。');
+  error.code = diagnosticCodes.has(cause?.code) ? cause.code : 'DB_UNAVAILABLE';
+  return error;
+};
 export function postgresConfig(env = process.env) {
   try {
     if (!env.DATABASE_URL?.trim()) throw unavailable();
@@ -19,7 +24,7 @@ export function postgresConfig(env = process.env) {
       idle_in_transaction_session_timeout: 15000,
       application_name: 'money-mind-happy',
     };
-  } catch { throw new Error('DATABASE_URLまたはTLS設定を確認してください。'); }
+  } catch { const error = new Error('DATABASE_URLまたはTLS設定を確認してください。'); error.code = 'DB_CONFIG_INVALID'; throw error; }
 }
 
 export function createPostgresStore({ env = process.env, Pool = pg.Pool } = {}) {
@@ -27,7 +32,7 @@ export function createPostgresStore({ env = process.env, Pool = pg.Pool } = {}) 
   // pg emits idle connection errors; never log raw errors containing connection details.
   pool.on('error', () => {});
   let closed;
-  async function safe(operation) { try { return await operation(); } catch { throw unavailable(); } }
+  async function safe(operation) { try { return await operation(); } catch (error) { throw unavailable(error); } }
   return {
     health: () => safe(async () => {
       const { rows } = await pool.query({ text: 'SELECT 1 AS ok', query_timeout: 2000 });
