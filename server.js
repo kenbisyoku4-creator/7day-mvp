@@ -126,7 +126,11 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     server.on('error', () => { console.error('アプリを起動できません。設定を確認してください。'); process.exitCode = 1; server.close(); });
     server.listen(port, '0.0.0.0', () => console.log(`Server listening on port ${port}`));
     for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, () => { server.close(); server.closeIdleConnections(); });
-  } catch {
+  } catch (error) {
+    // Print only an allowlisted diagnostic code; never print raw driver errors.
+    const codes = new Set(['DB_CONFIG_INVALID', 'DB_UNAVAILABLE', '28P01', '28000', '3D000', '3F000', '42P01', '42703', '42501', '53300', '57P03', 'ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED', 'ETIMEDOUT', 'ECONNRESET', 'SELF_SIGNED_CERT_IN_CHAIN', 'DEPTH_ZERO_SELF_SIGNED_CERT', 'UNABLE_TO_VERIFY_LEAF_SIGNATURE', 'UNABLE_TO_GET_ISSUER_CERT_LOCALLY', 'CERT_HAS_EXPIRED', 'ERR_TLS_CERT_ALTNAME_INVALID']);
+    const code = codes.has(error?.code) ? error.code : 'STARTUP_FAILED';
+    console.error('起動診断コード: ' + code);
     console.error('アプリを起動できません。データベースとTLSの設定を確認してください。');
     if (server) { server.close(); await server.storageClosed; }
     process.exitCode = 1;
